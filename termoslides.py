@@ -1,40 +1,48 @@
-#!/usr/bin/python3
 import os
-import shutil
-from subprocess import run
 from argparse import ArgumentParser
+from shutil import get_terminal_size
 
 
-# supported terminal styles
-TERM_STYLES: dict = {
+# supported ANSII escape codes
+ANSII_CODES: dict = {
     'bold': '\033[1m',
     'italic': '\033[3m',
     'underline': '\033[4m',
     'strikethrough': '\033[9m',
-    'reset': '\033[0m'
+    'reset': '\033[0m',
+    'clear': '\033[2J\033[H',
+    'enable_alt_buffer': '\033[s\033[?25l\033[?1049h',
+    'disable_alt_buffer': '\033[?1049l\033[u\033[?25h',
 }
 
 
+def write(*args: str) -> None:
+    """ A thin wrapper around the "print" function with overriden defaults
+
+    """
+    print(*args, sep='', end='')
+
+
 def play(slides: str) -> None:
-    global TERM_STYLES
+    global ANSII_CODES
 
     # get the size of terminal
-    width, height = shutil.get_terminal_size()
+    WIDTH, HEIGHT = get_terminal_size()
 
     with open(slides, 'rb') as fd:
         # apply styles to the text
         # TODO: rethink style escape method
-        pages = []
-        page_max_lens = []
+        pages: list = []
+        page_max_widths: list = []
         for page in fd.read().decode().split('EOS\n'):
-            lines = []
-            line_lens = []
+            lines: list[str] = []
+            line_lens: list[int] = []
 
             # iterate over lines in page and apply styles
             # also compute maximum line length for current page
-            for line in page.split('\n'):
+            for line in page.rstrip().split('\n'):
                 clean_line = line
-                for style, code in TERM_STYLES.items():
+                for style, code in ANSII_CODES.items():
                     style_format = f'{{{style}}}'
                     clean_line = clean_line.replace(style_format, '')
                     line = line.replace(style_format, code)
@@ -44,37 +52,36 @@ def play(slides: str) -> None:
 
             # collect page and its maximum length
             pages.append(lines)
-            page_max_lens.append(max(line_lens))
+            page_max_widths.append(max(line_lens))
             del lines, line_lens
 
-    page_count = len(pages)
-    pid = 0
+    page_count: int = len(pages)
+    pid: int = 0
     while pid < page_count:
         page = pages[pid]
-        max_len = page_max_lens[pid]
+        max_width = page_max_widths[pid]
         pid += 1
-        clear()
 
         # generate horizontal and vertival padddings
-        padx = ' ' * ((width - max_len) // 2)
-        pady = '\n' * ((height - len(page) - 2) // 2)
+        padx = ' ' * ((WIDTH - max_width) // 2)
+        pady_size, offset = divmod(HEIGHT - len(page), 2)
+        pady = '\n' * pady_size
 
-        # set top padding
-        print(pady)
-
-        for line in page:
-            # print(f'{padx}{line}'[:width - 5])
-            print(padx, line, sep='')
-
-        # set bottom padding
-        print(pady)
-        print('\033[92m' + f'Slides [{pid}/{page_count}]: ', end='')
+        write(
+            ANSII_CODES['clear'],
+            pady,
+            '\n'.join(f'{padx}{line}' for line in page),
+            pady,
+            '\n' * offset,
+            '\033[92m',
+            f'Slides [{pid}/{page_count}]: Goto -> ',
+        )
 
         # navigate to the page
-        raw_next_id: str = input(' Goto -> ')
+        raw_next_id: str = input()
 
         # remove color settings
-        print(TERM_STYLES['reset'])
+        write(ANSII_CODES['reset'])
 
         # resolve the next slide
         if not raw_next_id:
@@ -89,35 +96,30 @@ def play(slides: str) -> None:
         else:
             pid -= 1
 
-    clear()
-
-
-# define cross-platform terminal screen cleanup function
-if os.name == 'nt':
-    def clear() -> None:
-        """ Clear terminal screen
-
-        """
-        run('cls', shell=True)
-else:
-    def clear() -> None:
-        """ Clear terminal screen
-
-        """
-        run('clear')
-
 
 if __name__ == '__main__':
     cmd_parser = ArgumentParser(description='Terminal Slides')
     cmd_parser.add_argument(
         'slides',
-        help='file containing slides'
+        help='path to the file containing slides'
     )
     cmd_args = cmd_parser.parse_args()
 
+    if not os.path.isfile(cmd_args.slides):
+        cmd_parser.error("File not found")
+        exit(1)
+
     try:
+        # save the cursor's position and enable the alternative buffer
+        write(ANSII_CODES['enable_alt_buffer'])
         play(cmd_args.slides)
     except KeyboardInterrupt:
-        # remove color settings
-        print(TERM_STYLES['reset'])
-        clear()
+        pass
+    finally:
+        # disable the alternative buffer and restore the cursor's position
+        write(
+            ANSII_CODES['clear'],
+            ANSII_CODES['reset'],
+            ANSII_CODES['disable_alt_buffer'],
+            ANSII_CODES['reset'],
+        )
