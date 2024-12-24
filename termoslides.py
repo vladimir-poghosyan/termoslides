@@ -2,17 +2,16 @@ import os
 from argparse import ArgumentParser
 from shutil import get_terminal_size
 
+from typing import Final
 
-# supported ANSII escape codes
-ANSII_CODES: dict = {
+
+# supported ANSII escape codes for styling
+ANSII_CODES: Final[dict] = {
     'bold': '\033[1m',
     'italic': '\033[3m',
     'underline': '\033[4m',
     'strikethrough': '\033[9m',
     'reset': '\033[0m',
-    'clear': '\033[2J\033[H',
-    'enable_alt_buffer': '\033[s\033[?25l\033[?1049h',
-    'disable_alt_buffer': '\033[?1049l\033[u\033[?25h',
 }
 
 
@@ -40,7 +39,7 @@ def play(slides: str) -> None:
 
             # iterate over lines in page and apply styles
             # also compute maximum line length for current page
-            for line in page.rstrip().split('\n'):
+            for line in page.split('\n'):
                 clean_line = line
                 for style, code in ANSII_CODES.items():
                     style_format = f'{{{style}}}'
@@ -63,18 +62,13 @@ def play(slides: str) -> None:
         pid += 1
 
         # generate horizontal and vertival padddings
-        padx = ' ' * ((WIDTH - max_width) // 2)
-        pady_size, offset = divmod(HEIGHT - len(page), 2)
-        pady = '\n' * pady_size
+        padx_chars: str = ' ' * ((WIDTH - max_width) // 2)
+        pady: int = round((HEIGHT - len(page) + 1) / 2)
 
         write(
-            ANSII_CODES['clear'],
-            pady,
-            '\n'.join(f'{padx}{line}' for line in page),
-            pady,
-            '\n' * offset,
-            '\033[92m',
-            f'Slides [{pid}/{page_count}]: Goto -> ',
+            f'\033[2J\033[H\033[{pady};0f',
+            '\n'.join(f'{padx_chars}{line}' for line in page),
+            f'\033[{HEIGHT};0f\033[92mSlides [{pid}/{page_count}]: Goto -> ',
         )
 
         # navigate to the page
@@ -111,15 +105,11 @@ if __name__ == '__main__':
 
     try:
         # save the cursor's position and enable the alternative buffer
-        write(ANSII_CODES['enable_alt_buffer'])
+        write('\033[s\033[?25l\033[?1049h')
         play(cmd_args.slides)
     except KeyboardInterrupt:
         pass
     finally:
-        # disable the alternative buffer and restore the cursor's position
-        write(
-            ANSII_CODES['clear'],
-            ANSII_CODES['reset'],
-            ANSII_CODES['disable_alt_buffer'],
-            ANSII_CODES['reset'],
-        )
+        # clear screen + reset + disable the alternative buffer + restore the
+        # cursor's position + reset
+        write('\033[2J\033[H\033[0m\033[?1049l\033[u\033[?25h\033[0m')
